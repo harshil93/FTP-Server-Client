@@ -11,7 +11,10 @@
 #include <unistd.h> // close()
 #include <errno.h>
 #include <sys/wait.h>
-
+#include <algorithm> 
+#include <functional> 
+#include <cctype>
+#include <locale>
 using namespace std;
 
 #define PR(x) cout << #x " = " << x << "\n";
@@ -20,14 +23,71 @@ using namespace std;
 #define BACKLOG 100             // No. of backlog reqeusts
 #define BUFSIZE 2048			// BufferSize
 
+void hexDump (char *desc, void *addr, int len) {
+    int i;
+    unsigned char buff[17];
+    unsigned char *pc = (unsigned char*)addr;
 
+    // Output description if given.
+    if (desc != NULL)
+        printf ("%s:\n", desc);
+
+    // Process every byte in the data.
+    for (i = 0; i < len; i++) {
+        // Multiple of 16 means new line (with line offset).
+
+        if ((i % 16) == 0) {
+            // Just don't print ASCII for the zeroth line.
+            if (i != 0)
+                printf ("  %s\n", buff);
+
+            // Output the offset.
+            printf ("  %04x ", i);
+        }
+
+        // Now the hex code for the specific character.
+        printf (" %02x", pc[i]);
+
+        // And store a printable ASCII character for later.
+        if ((pc[i] < 0x20) || (pc[i] > 0x7e))
+            buff[i % 16] = '.';
+        else
+            buff[i % 16] = pc[i];
+        buff[(i % 16) + 1] = '\0';
+    }
+
+    // Pad out last line if not exactly 16 characters.
+    while ((i % 16) != 0) {
+        printf ("   ");
+        i++;
+    }
+
+    // And print the final ASCII bit.
+    printf ("  %s\n", buff);
+}
+// trim from start
+static inline std::string &ltrim(std::string &s) {
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
+        return s;
+}
+
+// trim from end
+static inline std::string &rtrim(std::string &s) {
+        s.erase(std::find_if(s.rbegin(), s.rend(), std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+        return s;
+}
+
+// trim from both ends
+static inline std::string &trim(std::string &s) {
+        return ltrim(rtrim(s));
+}
 
 /**
  * server_listen - bind to the supplied port and listen
  * @param  char* port - a string
  * @return int the fd if no error otherwise <0 value which indicates error
  */
-int server_listen(char *port){
+int server_listen(const char *port){
 	// Create address structs
 	struct addrinfo hints, *res;
 	int sock_fd;
@@ -218,7 +278,6 @@ int send_all(int socket,const void *buffer, size_t length) {
     size_t i = 0;
     for (i = 0; i < length;){
     	int bytesSent = send(socket, buffer, length - i,MSG_NOSIGNAL);
-    	PR(bytesSent)
     	if(bytesSent==-1){
     		return errno;
     	}else{
@@ -235,40 +294,72 @@ int send_all(int socket,const void *buffer, size_t length) {
  */
 
 int recvall(int serverfd, string& result){
+	int len=0;
 	while(1){
 		char buf[10001];
 		int bytesRead;
 		if((bytesRead = recv(serverfd,buf,10000,0)) >0){
 			result = string(buf,buf+bytesRead);
-			return 0;
-		}else{
+			len+=bytesRead;
+		}else if(bytesRead<0){
 			return -1;
+		}else{
+			return len;
 		}
 	}
 }
 
-int recvonce(int serverfd, string& result){
-	
-	char buf[1001];
-	int bytesRead;
-	if((bytesRead = recv(serverfd,buf,1000,0)) >0){
-		PR(bytesRead)
-		result = string(buf,buf+bytesRead);
-		PR(result)
-		cout<<"andar"<<endl;
-		return 0;
-	}else{
-		cerr<<"returning -1"<<endl;
-		cerr<<errno<<endl;
-		cout<<"errno"<<endl;
+int recvallbinary(int serverfd, FILE *fd){
+	unsigned char buf[10001];
+	int bytesRead=0;
+	int len=0;
+	while((bytesRead = recv(serverfd,buf,10000,0)) >0){
+		cout<<"CALLED"<<endl;
+		len+=bytesRead;
+		fwrite(buf,1,bytesRead,fd);
+	}
+	if(bytesRead < 0){
+		cerr<<"Error Occurred";
 		return -1;
+	}else{
+		
+		return len;
+	}
+}
+
+string remBuf;
+
+int recvoneline(int serverfd, string& result){
+	char buf[1001];
+	int bytesRead=0;
+	result = remBuf;
+	do{
+		result+=string(buf,buf+bytesRead);
+		int pos = result.find("\r\n");
+		if(pos!=string::npos){
+			//found
+			remBuf=result.substr(pos+2);
+			result=result.substr(0,pos+2);
+			break;
+		}
+	}while((bytesRead = recv(serverfd,buf,1000,0)) >0);
+
+	if(bytesRead < 0){
+		cerr<<"Error Occurred";
+		return -1;
+	}else{
+		return 0;
 	}
 	
 }
 
+void getportstring(string& portstr, string& port){
+	portstr = "PORT 127,0,0,1,35,40\r\n";
+	port="9000";
+}
 
 int main(int argc, char **argv){
-
+	remBuf="";
 	if(argc!=3){
 		cout<<"The correct format is $./client <host> <port>";
 		return 0;
@@ -279,56 +370,135 @@ int main(int argc, char **argv){
 		string    command[] =    //these are the commands we send to ftp server
 		{
 		        "USER harshil\r\n",   
-		        "PASS omnamo\r\n",
-		        "PORT 127,0,0,1,35,40\r\n",             //passive mode for firewalls
-		        "LIST\r\n"         //put the file onto the server
+		        "PASS omnamo\r\n"
 		};
+
 		string res;
-		recvonce(serverfd,res);
+		recvoneline(serverfd,res);
 		cout<<res<<endl;
 		send_all(serverfd,command[0].c_str(),command[0].length());
-		recvonce(serverfd,res);
+		recvoneline(serverfd,res);
 		cout<<res<<endl;
 		send_all(serverfd,command[1].c_str(),command[1].length());
-		recvonce(serverfd,res);
+		recvoneline(serverfd,res);
 		cout<<res<<endl;
 
-		int pid = fork();
 
-		if(pid != 0){
-			// int *sta = (int *) malloc(sizeof(int));
-			wait(NULL);
-			// cout<<"asdfasdfasdfasdfasd "<<(*sta)<<endl;
-			recvonce(serverfd,res);
-			cout<<"sdfsdf"<<endl;
-			cout<<res<<endl;
-			return 0;
-			//parent
-		}else{
-			//child which will receive data
-			cout<<"CHILD"<<endl;
-			char port[] = "9000";
-			int dataportserverfd = server_listen(port);
-			PR(dataportserverfd)
-			send_all(serverfd,command[2].c_str(),command[2].length());
-			cout<<"after send_all"<<endl;
-			recvonce(serverfd,res);
-			cout<<"223"<<endl;
-			cout<<res<<endl;
-			send_all(serverfd,command[3].c_str(),command[3].length());
-			recvonce(serverfd,res);
-			cout<<res<<endl;
-			cout<<"@##@"<<endl;
-			int dataportclientfd = accept_connection(dataportserverfd);
-			recvall(dataportclientfd,res);
-			cout<<"------------DATA---------"<<endl;
-			cout<<res<<endl;
-			cout<<"-------END-DATA---------"<<endl;
-			close(dataportclientfd);
-			close(dataportserverfd);
+		while(1){
+			cout<<"ftp>";
+			string userinput;
+			getline(std::cin,userinput);
+			ltrim(userinput);
+			if(userinput.compare(0,strlen("put"),"put") == 0){
+					cout<<"put"<<endl;
+			}else if(userinput.compare(0,strlen("get"),"get") == 0){
+				cout<<"get"<<endl;
+				int pid = fork();
+				if(pid != 0){
+					int stat;
+					wait(&stat);
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					
+				}else{
+					string typei = "TYPE I\r\n";
+					send_all(serverfd,typei.c_str(),typei.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					
+					string portstr,port;
+					getportstring(portstr,port);
+					
+					int dataportserverfd = server_listen(port.c_str());
+					PR(dataportserverfd)
+					send_all(serverfd,portstr.c_str(),portstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
 
-			return 0;
+					string path = userinput.substr(3);
+					path = trim(path);
+					PR(path)
+					string getstr = "RETR "+path+"\r\n";
+					send_all(serverfd,getstr.c_str(),getstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+
+					int dataportclientfd = accept_connection(dataportserverfd);
+					
+					FILE * filew;
+					int numw;
+
+					filew=fopen(path.c_str(),"wb");
+					int len = recvallbinary(dataportclientfd,filew);
+					cout<<"Bytes Received : "<<len<<endl;
+					fclose(filew);
+					close(dataportclientfd);
+					close(dataportserverfd);
+					return 0;
+
+				}
+			}else if(userinput.compare(0,strlen("ls"),"ls") == 0){
+				int pid = fork();
+				if(pid != 0){
+					int stat;
+					wait(&stat);
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					
+
+				}else{
+					//child which will receive data
+					string portstr,port;
+					getportstring(portstr,port);
+					
+					int dataportserverfd = server_listen(port.c_str());
+					PR(dataportserverfd)
+					send_all(serverfd,portstr.c_str(),portstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					send_all(serverfd,"LIST\r\n",strlen("LIST\r\n"));
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					int dataportclientfd = accept_connection(dataportserverfd);
+					recvall(dataportclientfd,res);
+					cout<<"------------DATA---------"<<endl;
+					cout<<res<<endl;
+					cout<<"-------END-DATA---------"<<endl;
+					close(dataportclientfd);
+					close(dataportserverfd);
+					return 0;
+
+				}
+			}else if(userinput.compare(0,strlen("cd"),"cd") == 0){
+					cout<<"cd"<<endl;
+					string path = userinput.substr(2);
+					path = trim(path);
+					string cwdstr = "CWD "+path+"\r\n";
+					send_all(serverfd,cwdstr.c_str(),cwdstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+			}else if(userinput.compare(0,strlen("pwd"),"pwd") == 0){
+					string pwdstr = "PWD\r\n";
+					send_all(serverfd,pwdstr.c_str(),pwdstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+			}else if(userinput.compare(0,strlen("!ls"),"!ls") == 0){
+					cout<<"!ls"<<endl;
+			}else if(userinput.compare(0,strlen("!cd"),"!cd") == 0){
+					cout<<"!cd"<<endl;
+			}else if(userinput.compare(0,strlen("!pwd"),"!pwd") == 0){
+					cout<<"!pwd"<<endl;
+			}else if(userinput.compare(0,strlen("quit"),"quit") == 0){
+					cout<<"quit"<<endl;
+			}/*else{
+					send_all(serverfd,(userinput+"\r\n").c_str(),userinput.size() + 2);
+					recvoneline(serverfd,res);
+					cout<<res<<endl;	
+			}*/
 		}
+		
+
+		
 		//server should be created
 		
 
