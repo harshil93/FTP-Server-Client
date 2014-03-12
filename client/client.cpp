@@ -15,6 +15,8 @@
 #include <functional> 
 #include <cctype>
 #include <locale>
+#include <sys/stat.h>
+#include <dirent.h>
 using namespace std;
 
 #define PR(x) cout << #x " = " << x << "\n";
@@ -23,48 +25,6 @@ using namespace std;
 #define BACKLOG 100             // No. of backlog reqeusts
 #define BUFSIZE 2048			// BufferSize
 
-void hexDump (char *desc, void *addr, int len) {
-    int i;
-    unsigned char buff[17];
-    unsigned char *pc = (unsigned char*)addr;
-
-    // Output description if given.
-    if (desc != NULL)
-        printf ("%s:\n", desc);
-
-    // Process every byte in the data.
-    for (i = 0; i < len; i++) {
-        // Multiple of 16 means new line (with line offset).
-
-        if ((i % 16) == 0) {
-            // Just don't print ASCII for the zeroth line.
-            if (i != 0)
-                printf ("  %s\n", buff);
-
-            // Output the offset.
-            printf ("  %04x ", i);
-        }
-
-        // Now the hex code for the specific character.
-        printf (" %02x", pc[i]);
-
-        // And store a printable ASCII character for later.
-        if ((pc[i] < 0x20) || (pc[i] > 0x7e))
-            buff[i % 16] = '.';
-        else
-            buff[i % 16] = pc[i];
-        buff[(i % 16) + 1] = '\0';
-    }
-
-    // Pad out last line if not exactly 16 characters.
-    while ((i % 16) != 0) {
-        printf ("   ");
-        i++;
-    }
-
-    // And print the final ASCII bit.
-    printf ("  %s\n", buff);
-}
 // trim from start
 static inline std::string &ltrim(std::string &s) {
         s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
@@ -327,6 +287,25 @@ int recvallbinary(int serverfd, FILE *fd){
 	}
 }
 
+
+int sendallbinary(int serverfd, FILE *fd,int size){
+	unsigned char buf[100001];
+	int bytesSent=0;
+	while(size>0){
+		int bytesRead = fread(buf,1,100000,fd);
+		int stat = send_all(serverfd,buf,bytesRead);
+		if(stat != 0 ){
+			cout<<"ERROR IN SENDING"<<endl;
+			return -1;
+		}
+		PR(bytesRead)
+		size = size - bytesRead;
+		PR(size)
+	}
+	return 0;	
+}
+
+
 string remBuf;
 
 int recvoneline(int serverfd, string& result){
@@ -373,13 +352,19 @@ int main(int argc, char **argv){
 		        "PASS omnamo\r\n"
 		};
 
-		string res;
+		string res,user,pass;
 		recvoneline(serverfd,res);
 		cout<<res<<endl;
-		send_all(serverfd,command[0].c_str(),command[0].length());
+		cout<<"Enter Your Username"<<endl;
+		getline(std::cin,user);
+		string userstr = "USER "+user+"\r\n";
+		send_all(serverfd,userstr.c_str(),userstr.size());
 		recvoneline(serverfd,res);
 		cout<<res<<endl;
-		send_all(serverfd,command[1].c_str(),command[1].length());
+		cout<<"Enter Your Pass"<<endl;
+		getline(std::cin,pass);
+		string passstr = "PASS "+pass+"\r\n";
+		send_all(serverfd,passstr.c_str(),passstr.size());
 		recvoneline(serverfd,res);
 		cout<<res<<endl;
 
@@ -390,7 +375,57 @@ int main(int argc, char **argv){
 			getline(std::cin,userinput);
 			ltrim(userinput);
 			if(userinput.compare(0,strlen("put"),"put") == 0){
-					cout<<"put"<<endl;
+				cout<<"put"<<endl;
+				int pid = fork();
+				if(pid != 0){
+					int stat;
+					wait(&stat);
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					
+				}else{
+					string typei = "TYPE I\r\n";
+					send_all(serverfd,typei.c_str(),typei.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+					
+					string portstr,port;
+					getportstring(portstr,port);
+					
+					int dataportserverfd = server_listen(port.c_str());
+					PR(dataportserverfd)
+					send_all(serverfd,portstr.c_str(),portstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+
+					string path = userinput.substr(3);
+					path = trim(path);
+					PR(path)
+					string getstr = "STOR "+path+"\r\n";
+					send_all(serverfd,getstr.c_str(),getstr.size());
+					recvoneline(serverfd,res);
+					cout<<res<<endl;
+
+					int dataportclientfd = accept_connection(dataportserverfd);
+
+					cout<<"Connection Accepted "<<dataportclientfd<<endl;
+
+					struct stat st;
+					stat(path.c_str(), &st);
+					int size = st.st_size;
+					PR(size)
+					FILE * filew;
+					int numw;
+					filew=fopen(path.c_str(),"rb");
+					cout<<"file opened"<<endl;
+					int len = sendallbinary(dataportclientfd,filew,size);
+					
+					fclose(filew);
+					close(dataportclientfd);
+					close(dataportserverfd);
+					return 0;
+
+				}
 			}else if(userinput.compare(0,strlen("get"),"get") == 0){
 				cout<<"get"<<endl;
 				int pid = fork();
@@ -483,18 +518,39 @@ int main(int argc, char **argv){
 					recvoneline(serverfd,res);
 					cout<<res<<endl;
 			}else if(userinput.compare(0,strlen("!ls"),"!ls") == 0){
-					cout<<"!ls"<<endl;
+					DIR *dp;
+					struct dirent *ep;     
+					dp = opendir ("./");
+					if (dp != NULL)
+					  {
+					    while (ep = readdir (dp))
+					      cout<<ep->d_name<<endl;
+					    closedir (dp);
+					  }
+					  else
+					    perror ("Couldn't open the directory");
 			}else if(userinput.compare(0,strlen("!cd"),"!cd") == 0){
-					cout<<"!cd"<<endl;
+					string path = userinput.substr(3);
+					path = trim(path);
+					int stat = chdir(path.c_str());
+					if(stat==0)
+						cout<<"Directory Successfully Changed"<<endl;
+					else
+						cout<<strerror(errno)<<endl;
 			}else if(userinput.compare(0,strlen("!pwd"),"!pwd") == 0){
 					cout<<"!pwd"<<endl;
+					char cwd[1024];
+			       if (getcwd(cwd, sizeof(cwd)) != NULL)
+			           cout<<"Current Dir: "<<cwd<<endl;
+			       else
+			           perror("getcwd() error");
+
 			}else if(userinput.compare(0,strlen("quit"),"quit") == 0){
-					cout<<"quit"<<endl;
-			}/*else{
-					send_all(serverfd,(userinput+"\r\n").c_str(),userinput.size() + 2);
-					recvoneline(serverfd,res);
-					cout<<res<<endl;	
-			}*/
+					close(serverfd);
+					exit(0);
+			}else{
+				cout<<"UNKNOWN COMMAND"<<endl;	
+			}
 		}
 		
 
