@@ -16,6 +16,7 @@
 #include <cctype>
 #include <locale>
 #include <sys/stat.h>
+#include <sstream>
 #include <dirent.h>
 using namespace std;
 
@@ -150,7 +151,7 @@ int accept_connection(int server_fd){
 
 	// Print out IP address
 	inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
-	printf("server: got connection from %s\n", s);
+	// printf("server: got connection from %s\n", s);
 	// Setting Timeout
 	struct timeval tv;
 	tv.tv_sec = 120;  /* 120 Secs Timeout */
@@ -223,7 +224,7 @@ int make_client_connection (const char *host, const char *port)
 
   // Don't need the structure with address info any more
   freeaddrinfo(res);
-  PR(sock_fd)
+
   return sock_fd;
 }
 
@@ -259,7 +260,7 @@ int recvall(int serverfd, string& result){
 		char buf[10001];
 		int bytesRead;
 		if((bytesRead = recv(serverfd,buf,10000,0)) >0){
-			result = string(buf,buf+bytesRead);
+			result += string(buf,buf+bytesRead);
 			len+=bytesRead;
 		}else if(bytesRead<0){
 			return -1;
@@ -274,7 +275,6 @@ int recvallbinary(int serverfd, FILE *fd){
 	int bytesRead=0;
 	int len=0;
 	while((bytesRead = recv(serverfd,buf,10000,0)) >0){
-		cout<<"CALLED"<<endl;
 		len+=bytesRead;
 		fwrite(buf,1,bytesRead,fd);
 	}
@@ -298,9 +298,9 @@ int sendallbinary(int serverfd, FILE *fd,int size){
 			cout<<"ERROR IN SENDING"<<endl;
 			return -1;
 		}
-		PR(bytesRead)
+		
 		size = size - bytesRead;
-		PR(size)
+		
 	}
 	return 0;	
 }
@@ -332,9 +332,42 @@ int recvoneline(int serverfd, string& result){
 	
 }
 
-void getportstring(string& portstr, string& port){
-	portstr = "PORT 127,0,0,1,35,40\r\n";
-	port="9000";
+string exec(const char* cmd) {
+    FILE* pipe = popen(cmd, "r");
+    if (!pipe) return "ERROR";
+    char buffer[128];
+    std::string result = "";
+    while(!feof(pipe)) {
+    	if(fgets(buffer, 128, pipe) != NULL)
+    		result += buffer;
+    }
+    pclose(pipe);
+    return result;
+}
+
+string int2str(int k){
+	stringstream ss;
+	ss<<k;
+	return ss.str();
+}
+
+string getownip(int m_sd){
+	struct sockaddr_in localAddress;
+	socklen_t addressLength = sizeof(localAddress);
+	getsockname(m_sd, (struct sockaddr*)&localAddress, &addressLength);
+	return string(inet_ntoa( localAddress.sin_addr));
+}
+void getportstring(string ownip,string& portstr, string& port){
+	for (int i = 0; i < ownip.size(); ++i)
+	{
+		if(ownip[i] == '.') ownip[i] = ',';
+	}
+	int portnum = 40001 + rand() % 10;
+	string p1 = int2str(portnum/256);
+	string p2 = int2str(portnum%256);
+	portstr = "PORT "+ownip+","+p1+","+p2+"\r\n";
+	//portstr = "PORT 127,0,0,1,"+p1+","+p2+"\r\n";
+	port = int2str(portnum);
 }
 
 int main(int argc, char **argv){
@@ -345,28 +378,24 @@ int main(int argc, char **argv){
 	}
 	int serverfd;
 	if( (serverfd = make_client_connection(argv[1],argv[2]) ) > 0 ){
-
-		string    command[] =    //these are the commands we send to ftp server
-		{
-		        "USER harshil\r\n",   
-		        "PASS omnamo\r\n"
-		};
-
+		PR(getownip(serverfd))
 		string res,user,pass;
 		recvoneline(serverfd,res);
-		cout<<res<<endl;
+		cout<<"Response: "<<res<<endl;
 		cout<<"Enter Your Username"<<endl;
 		getline(std::cin,user);
 		string userstr = "USER "+user+"\r\n";
+		cout<<"Request: "<<userstr<<endl;
 		send_all(serverfd,userstr.c_str(),userstr.size());
 		recvoneline(serverfd,res);
-		cout<<res<<endl;
+		cout<<"Response: "<<res<<endl;
 		cout<<"Enter Your Pass"<<endl;
 		getline(std::cin,pass);
 		string passstr = "PASS "+pass+"\r\n";
+		cout<<"Request: "<<passstr<<endl;
 		send_all(serverfd,passstr.c_str(),passstr.size());
 		recvoneline(serverfd,res);
-		cout<<res<<endl;
+		cout<<"Response: "<<res<<endl;
 
 
 		while(1){
@@ -375,49 +404,47 @@ int main(int argc, char **argv){
 			getline(std::cin,userinput);
 			ltrim(userinput);
 			if(userinput.compare(0,strlen("put"),"put") == 0){
-				cout<<"put"<<endl;
+				//cout<<"put"<<endl;
 				int pid = fork();
 				if(pid != 0){
 					int stat;
 					wait(&stat);
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					
 				}else{
 					string typei = "TYPE I\r\n";
+					cout<<"Request: "<<typei<<endl;
 					send_all(serverfd,typei.c_str(),typei.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
-					
+					cout<<"Response: "<<res<<endl;
 					string portstr,port;
-					getportstring(portstr,port);
+					getportstring(getownip(serverfd),portstr,port);
 					
 					int dataportserverfd = server_listen(port.c_str());
-					PR(dataportserverfd)
+					cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 
 					string path = userinput.substr(3);
 					path = trim(path);
-					PR(path)
-					string getstr = "STOR "+path+"\r\n";
-					send_all(serverfd,getstr.c_str(),getstr.size());
+					
+					string storstr = "STOR "+path+"\r\n";
+					cout<<"Request: "<<storstr<<endl;
+					send_all(serverfd,storstr.c_str(),storstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 
 					int dataportclientfd = accept_connection(dataportserverfd);
-
-					cout<<"Connection Accepted "<<dataportclientfd<<endl;
-
 					struct stat st;
 					stat(path.c_str(), &st);
 					int size = st.st_size;
-					PR(size)
+					
 					FILE * filew;
 					int numw;
 					filew=fopen(path.c_str(),"rb");
-					cout<<"file opened"<<endl;
+					cout<<"DATA TRANSFER"<<endl;
 					int len = sendallbinary(dataportclientfd,filew,size);
 					
 					fclose(filew);
@@ -433,30 +460,32 @@ int main(int argc, char **argv){
 					int stat;
 					wait(&stat);
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					
 				}else{
 					string typei = "TYPE I\r\n";
+					cout<<"Request: "<<typei<<endl;
 					send_all(serverfd,typei.c_str(),typei.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					
 					string portstr,port;
-					getportstring(portstr,port);
+					getportstring(getownip(serverfd),portstr,port);
 					
 					int dataportserverfd = server_listen(port.c_str());
-					PR(dataportserverfd)
+					cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 
 					string path = userinput.substr(3);
 					path = trim(path);
-					PR(path)
+					
 					string getstr = "RETR "+path+"\r\n";
+					cout<<"Request: "<<getstr<<endl;
 					send_all(serverfd,getstr.c_str(),getstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 
 					int dataportclientfd = accept_connection(dataportserverfd);
 					
@@ -464,6 +493,7 @@ int main(int argc, char **argv){
 					int numw;
 
 					filew=fopen(path.c_str(),"wb");
+					cout<<"DATA TRANSFER"<<endl;
 					int len = recvallbinary(dataportclientfd,filew);
 					cout<<"Bytes Received : "<<len<<endl;
 					fclose(filew);
@@ -478,26 +508,26 @@ int main(int argc, char **argv){
 					int stat;
 					wait(&stat);
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					
 
 				}else{
 					//child which will receive data
 					string portstr,port;
-					getportstring(portstr,port);
-					
+					getportstring(getownip(serverfd),portstr,port);
 					int dataportserverfd = server_listen(port.c_str());
-					PR(dataportserverfd)
+					cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
+					cout<<"Request: "<<"LIST\r\n"<<endl;
 					send_all(serverfd,"LIST\r\n",strlen("LIST\r\n"));
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					int dataportclientfd = accept_connection(dataportserverfd);
 					recvall(dataportclientfd,res);
 					cout<<"------------DATA---------"<<endl;
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 					cout<<"-------END-DATA---------"<<endl;
 					close(dataportclientfd);
 					close(dataportserverfd);
@@ -509,14 +539,16 @@ int main(int argc, char **argv){
 					string path = userinput.substr(2);
 					path = trim(path);
 					string cwdstr = "CWD "+path+"\r\n";
+					cout<<"Request: "<<cwdstr<<endl;
 					send_all(serverfd,cwdstr.c_str(),cwdstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 			}else if(userinput.compare(0,strlen("pwd"),"pwd") == 0){
 					string pwdstr = "PWD\r\n";
+					cout<<"Request: "<<pwdstr<<endl;
 					send_all(serverfd,pwdstr.c_str(),pwdstr.size());
 					recvoneline(serverfd,res);
-					cout<<res<<endl;
+					cout<<"Response: "<<res<<endl;
 			}else if(userinput.compare(0,strlen("!ls"),"!ls") == 0){
 					DIR *dp;
 					struct dirent *ep;     
@@ -548,17 +580,13 @@ int main(int argc, char **argv){
 			}else if(userinput.compare(0,strlen("quit"),"quit") == 0){
 					close(serverfd);
 					exit(0);
-			}else{
+			}else if(userinput.compare(0,strlen("help"),"help") == 0){
+					cout<<"Look at the README file supplied"<<endl;
+			}			else{
 				cout<<"UNKNOWN COMMAND"<<endl;	
 			}
 		}
-		
-
-		
-		//server should be created
-		
-
-		
+				
 	}else{
 		cerr<<"Cannot connect to server"<<endl;
 	}

@@ -26,6 +26,8 @@ using namespace std;
 #define BACKLOG 100             // No. of backlog reqeusts
 #define BUFSIZE 2048			// BufferSize
 
+char *FTP_SERVER_CONTROL_PORT;
+char *FTP_SERVER_DATA_PORT;
 
 // trim from start
 static inline std::string &ltrim(std::string &s) {
@@ -460,7 +462,7 @@ int reverseportstring(string &in,string &ipstr,string &portstr){
 
 }
 
-std::string exec(const char* cmd) {
+string exec(const char* cmd) {
     FILE* pipe = popen(cmd, "r");
     if (!pipe) return "ERROR";
     char buffer[128];
@@ -504,7 +506,7 @@ void doftp(int clientControlfd){
 			portstr = trim(portstr);
 			string ip,port;
 			reverseportstring(portstr,ip,port);
-			datasocket = bindsocket("20");
+			datasocket = bindsocket(FTP_SERVER_DATA_PORT);
 			clientDatafd = make_client_connection_with_sockfd(datasocket,ip.c_str(),port.c_str());
 			string res = "200 PORT command successful\r\n";
 			send_all(clientControlfd,res.c_str(),res.size());
@@ -568,9 +570,8 @@ void doftp(int clientControlfd){
 			FILE * filew;
 			int numw;
 			filew=fopen(path.c_str(),"rb");
-			cout<<"file opened"<<endl;
 			int len = sendallbinary(clientDatafd,filew,size);
-			cout<<"Bytes Sent : "<<len<<endl;
+			cout<<"Bytes Sent : "<<size<<endl;
 			fclose(filew);
 			close(clientDatafd);
 			close(datasocket);
@@ -615,14 +616,24 @@ void doftp(int clientControlfd){
 			close(clientControlfd);
 			return;
 
+		}else{
+			string res = "500 Unknown command.\r\n";
+			send_all(clientControlfd,res.c_str(),res.size());
 		}
 	}
 
 }
 
 int main(int argc, char **argv){
-	char FTP_SERVER_CONTROL_PORT[] = "9001";
-	char FTP_SERVER_DATA_PORT[]= "20";
+	if(argc == 3){
+		FTP_SERVER_CONTROL_PORT = argv[1];
+		FTP_SERVER_DATA_PORT= argv[2];
+	}else{
+		cout<<"The format is ./server <control port> <data port>"<<endl;
+		cout<<"If you are using ports <1024 , use sudo ./server <control port> <data port>"<<endl;
+		exit(0);
+	}
+	
 
 	// make server bind and listen to the supplied port
 	int server_fd;
