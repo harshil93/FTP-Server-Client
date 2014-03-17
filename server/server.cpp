@@ -121,6 +121,11 @@ int server_listen(const char *port){
 	return sock_fd;
 }
 
+/**
+ * Binds to the supplied port.
+ * @param char * port 
+ * @return socket descriptor
+ */
 int bindsocket(const char *port){
 	// Create address structs
 	struct addrinfo hints, *res;
@@ -295,7 +300,12 @@ int make_client_connection (const char *host, const char *port)
   return sock_fd;
 }
 
-
+/**
+ * connects to remote host using supplied sock_fd
+ * @param const char *host  - Host's domain name or IP address 
+ * @param const char *port - The port to which we have to make connection. 
+ * @returns fd of socket, <0 if error
+ */
 int make_client_connection_with_sockfd (int sock_fd,const char *host, const char *port)
 {
 	struct addrinfo hints, *res;
@@ -359,6 +369,14 @@ int recvall(int serverfd, string& result){
 	}
 }
 
+/**
+ * It receives the data from serverfd till socket is closed and writes the data to the given file.
+ * @param int serverfd 
+ * @param FILE - file descriptor of the file created
+ * @param  result   sets the output to result
+ * @return          status code
+ */
+
 int recvallbinary(int serverfd, FILE *fd){
 	unsigned char buf[10001];
 	int bytesRead=0;
@@ -376,7 +394,13 @@ int recvallbinary(int serverfd, FILE *fd){
 	}
 }
 
-
+/**
+ * A wrapper function on send() socket all which tries to send the supplied file in binary mode.
+ * @param  int serverfd
+ * @param  FILE *fd - The file descriptor of the file to be sent
+ * @param  int size
+ * @return -1 on error 0 on success
+ */
 int sendallbinary(int serverfd, FILE *fd,int size){
 	unsigned char buf[100001];
 	int bytesSent=0;
@@ -394,7 +418,12 @@ int sendallbinary(int serverfd, FILE *fd,int size){
 
 
 string remBuf;
-
+/**
+ * Receives one line(upto /r/n ) from serverfd.
+ * @param  serverfd 
+ * @param  result   - the received one line is assigned to result
+ * @return  -1 on error, 0 on success.
+ */
 int recvoneline(int serverfd, string& result){
 	char buf[1001];
 	int bytesRead=0;
@@ -418,7 +447,15 @@ int recvoneline(int serverfd, string& result){
 	}
 	
 }
-
+/**
+ * Gives the ip and port from the standard PORT command.
+ * For eg. in = "PORT 127,0,0,1,35,40"
+ * 			gives ipstr = "127.0.0.1" , portstr = "9000" (35*256 + 40)
+ * @param  in      - input PORT command string
+ * @param  ipstr   - output ip
+ * @param  portstr - output port
+ * @return -1 on error, 0 on success
+ */
 int reverseportstring(string &in,string &ipstr,string &portstr){
 	int cnt=0,pos;;
 	string ip = in;
@@ -461,7 +498,11 @@ int reverseportstring(string &in,string &ipstr,string &portstr){
 	return 0;
 
 }
-
+/**
+ * executes a command and returns its output
+ * @param const char *cmd  - command to execute
+ * @return The output of the command
+ */
 string exec(const char* cmd) {
     FILE* pipe = popen(cmd, "r");
     if (!pipe) return "ERROR";
@@ -474,10 +515,15 @@ string exec(const char* cmd) {
     pclose(pipe);
     return result;
 }
-
+/**
+ * The main function handling FTP
+ * @param clientControlfd - clients control socket fd
+ */
 void doftp(int clientControlfd){
-	string progver = "220 (ftpserver0.1)\r\n";
+	string progver = "220 (ftpserver0.1)\r\n"; 
 	send_all(clientControlfd,progver.c_str(),progver.size());
+
+	// Handling dummy authentication (This is done to conform to the RFC 959)
 	string username;
 	recvoneline(clientControlfd,username);
 	if(username.compare(0,strlen("USER"),"USER") == 0){
@@ -493,23 +539,30 @@ void doftp(int clientControlfd){
 		string res = "430 Invalid Username\r\n";
 		send_all(clientControlfd,res.c_str(),res.size());
 	}
-	int clientDatafd=0,datasocket=0;
-	int binarymode = 0;
+
+
+	int clientDatafd=0,datasocket=0; // clientDatafd is for data connection, datasocket is the socketfd of the data server
+	int binarymode = 0; // For binary mode
 	while(1){
 		string command;
 		recvoneline(clientControlfd,command);
+
 		if(command.compare(0,strlen("SYST"),"SYST") == 0  ){
 			string res = "215 UNIX Type: L8\r\n";
 			send_all(clientControlfd,res.c_str(),res.size());
 		}else if(command.compare(0,strlen("PORT"),"PORT") == 0){
-			string portstr = command.substr(4);
+
+			string portstr = command.substr(4); // Getting the ipport string
 			portstr = trim(portstr);
 			string ip,port;
-			reverseportstring(portstr,ip,port);
-			datasocket = bindsocket(FTP_SERVER_DATA_PORT);
+			reverseportstring(portstr,ip,port); // Parsing the string.
+
+			datasocket = bindsocket(FTP_SERVER_DATA_PORT); // binds server to supplied data port
 			clientDatafd = make_client_connection_with_sockfd(datasocket,ip.c_str(),port.c_str());
+			
 			string res = "200 PORT command successful\r\n";
 			send_all(clientControlfd,res.c_str(),res.size());
+
 		}else if(command.compare(0,strlen("LIST"),"LIST") == 0){
 			if(clientDatafd>0){
 				string res = "150 Here comes the directory listing.\r\n";
@@ -560,6 +613,7 @@ void doftp(int clientControlfd){
 			string path = command.substr(4);
 			path = trim(path);
 
+			// Getting the filesize of the supplied file
 			struct stat st;
 			int statcode = stat(path.c_str(), &st);
 			int size = st.st_size;

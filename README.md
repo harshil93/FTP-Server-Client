@@ -3,12 +3,16 @@ FTP Server and Client
 By- Harshil Lodhi - 11010121
 	Shobhit Chaurasia - 11010179
 
+Video Presentation: https://www.youtube.com/watch?v=lLrd38ExXZc (Please see it once to get the feel of the total project - See it in HD)
+
 Salient Features:
-	- Follows the RFC 959.
+	- Closely Follows the RFC 959.
 	- Authentication Feature is implemented.
 	- Supports File Transfer of any size (no buffer limitation).
 	- Handles many errors for the client (Details given below).
-	- Also works with the linux standard vsftpd server on localhost port 21.
+	- Also works with the linux standard vsftpd server on localhost port 21. (You have to provide proper username password of the computer running vsftpd for this)
+	- Can view the raw ftp commands- request messages (for debugging) on client side. Give -d as 3rd arguement to client for this.
+		eg. ./client 127.0.0.1 9000 -d
 
 Error Handling:
 	- get <wrong file name>
@@ -22,14 +26,18 @@ Error Handling:
 
 ------------------------------------------------
 
-To run the server, goto server directory and.
+To compile and run the server, goto server directory and.
+	$ make
 	$ ./server <control port> <data port>
 	Eg - $ ./server 9000 9001
 
 
-To connect to the server, goto client directory and.
-	$ ./client <ip> <control port>
+To compile client and connect to the server, goto client directory and.
+	$ make
+	$ ./client <ip> <control port> [-d]
+		-d is optional for debuggin
 	Eg - $ ./client 127.0.0.1 9000
+		or $ ./client 127.0.0.1 9000 -d
 
 Client:
 	Supported Commands:
@@ -57,7 +65,13 @@ Sample Input-Output (Client Side).
 	- Response from server are shown in line starting with Response:
 	- Any username password will be accepted at this point of time
 
-	$ ./client 127.0.0.1 9000 
+	In server directory
+
+	$ ./server 9000 9001
+
+	CLIENT : In client directory
+
+	$ ./client 127.0.0.1 9000 -d
 
 	Response: 220 (ftpserver0.1)
 

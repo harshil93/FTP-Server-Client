@@ -21,11 +21,10 @@
 using namespace std;
 
 #define PR(x) cout << #x " = " << x << "\n";
-#define DEBUG 1
 #define LOG 1
 #define BACKLOG 100             // No. of backlog reqeusts
 #define BUFSIZE 2048			// BufferSize
-
+int debug;
 // trim from start
 static inline std::string &ltrim(std::string &s) {
         s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
@@ -270,6 +269,13 @@ int recvall(int serverfd, string& result){
 	}
 }
 
+/**
+ * Receives data in binary mode and writes it to fd
+ * @param  int serverfd 
+ * @param  FILE *fd       
+ * @return  -1 error, 0 success 
+ * 
+ * */
 int recvallbinary(int serverfd, FILE *fd){
 	unsigned char buf[10001];
 	int bytesRead=0;
@@ -287,7 +293,13 @@ int recvallbinary(int serverfd, FILE *fd){
 	}
 }
 
-
+/**
+ * Sends the to serverfd using binary mode reading from fd and 
+ * @param  serverfd 
+ * @param  FILE *fd       
+ * @param  int size - size of the file    
+ * @return -1 error, 0 success
+ */
 int sendallbinary(int serverfd, FILE *fd,int size){
 	unsigned char buf[100001];
 	int bytesSent=0;
@@ -306,8 +318,13 @@ int sendallbinary(int serverfd, FILE *fd,int size){
 }
 
 
-string remBuf;
-
+string remBuf; // to handle buffer
+/**
+ * Receives one line from serverfd and stores it in result
+ * @param  serverfd 
+ * @param  result   
+ * @return          -1 error, 0 success
+ */
 int recvoneline(int serverfd, string& result){
 	char buf[1001];
 	int bytesRead=0;
@@ -331,7 +348,11 @@ int recvoneline(int serverfd, string& result){
 	}
 	
 }
-
+/**
+ * To execute any system command
+ * @param  cmd - command to be executed
+ * @return  output of the command
+ */
 string exec(const char* cmd) {
     FILE* pipe = popen(cmd, "r");
     if (!pipe) return "ERROR";
@@ -344,19 +365,34 @@ string exec(const char* cmd) {
     pclose(pipe);
     return result;
 }
-
+/**
+ * Converts int to string
+ * @param  k - supplied integer
+ * @return   string
+ */
 string int2str(int k){
 	stringstream ss;
 	ss<<k;
 	return ss.str();
 }
-
+/**
+ * Gives the ip of the current system on which this code is running
+ * @param  m_sd - the socket descriptor
+ * @return - ip string 
+ */
 string getownip(int m_sd){
 	struct sockaddr_in localAddress;
 	socklen_t addressLength = sizeof(localAddress);
 	getsockname(m_sd, (struct sockaddr*)&localAddress, &addressLength);
 	return string(inet_ntoa( localAddress.sin_addr));
 }
+
+/**
+ * Selects a random port and gives its port string by assigning portstr and also giving port in port
+ * @param ownip   - the supplied ip (Eg. 127.0.0.1 )
+ * @param portstr - returned PORT command string. (Eg- PORT 127,0,0,1,35,40)
+ * @param port    - returned port (Eg - 9000)
+ */
 void getportstring(string ownip,string& portstr, string& port){
 	for (int i = 0; i < ownip.size(); ++i)
 	{
@@ -372,30 +408,39 @@ void getportstring(string ownip,string& portstr, string& port){
 
 int main(int argc, char **argv){
 	remBuf="";
-	if(argc!=3){
+	debug = 0;
+	if(argc<3){
 		cout<<"The correct format is $./client <host> <port>";
 		return 0;
 	}
+	if(argc == 4){
+		string msg = string(argv[3]);
+		if(msg == "-d"){
+			// Debug Mode
+			debug = 1;
+		}
+	}
 	int serverfd;
 	if( (serverfd = make_client_connection(argv[1],argv[2]) ) > 0 ){
+		// Sending out Authentication Information.
 		string res,user,pass;
 		recvoneline(serverfd,res);
 		cout<<"Response: "<<res<<endl;
 		cout<<"Enter Your Username"<<endl;
 		getline(std::cin,user);
 		string userstr = "USER "+user+"\r\n";
-		cout<<"Request: "<<userstr<<endl;
+		if(debug == 1) cout<<"Request: "<<userstr<<endl;
 		send_all(serverfd,userstr.c_str(),userstr.size());
 		recvoneline(serverfd,res);
 		cout<<"Response: "<<res<<endl;
 		cout<<"Enter Your Pass"<<endl;
 		getline(std::cin,pass);
 		string passstr = "PASS "+pass+"\r\n";
-		cout<<"Request: "<<passstr<<endl;
+		if(debug == 1) cout<<"Request: "<<passstr<<endl;
 		send_all(serverfd,passstr.c_str(),passstr.size());
 		recvoneline(serverfd,res);
 		cout<<"Response: "<<res<<endl;
-
+		//TODO - handle auth
 
 		while(1){
 			cout<<"ftp>";
@@ -412,8 +457,10 @@ int main(int argc, char **argv){
 					cout<<"Response: "<<res<<endl;
 					
 				}else{
-					string path = userinput.substr(3);
+					string path = userinput.substr(3); // Gets the filename from put command
 					path = trim(path);
+
+					// Gets the file size
 					struct stat st;
 					int statcode = stat(path.c_str(), &st);
 					int size = st.st_size;
@@ -421,32 +468,34 @@ int main(int argc, char **argv){
 						cout<<strerror(errno)<<endl;
 						continue;
 					}
-
+					// Switching to Binary Mode
 					string typei = "TYPE I\r\n";
-					cout<<"Request: "<<typei<<endl;
+					if(debug == 1) cout<<"Request: "<<typei<<endl;
 					send_all(serverfd,typei.c_str(),typei.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
+
+					// Getting a random port and corresponding PORT command
 					string portstr,port;
 					getportstring(getownip(serverfd),portstr,port);
 					
+					// Listening to data server
 					int dataportserverfd = server_listen(port.c_str());
-					cout<<"Request: "<<portstr<<endl;
+					if(debug == 1) cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
 
-					
-					
+					// Sending out the STOR command
 					string storstr = "STOR "+path+"\r\n";
-					cout<<"Request: "<<storstr<<endl;
+					if(debug == 1) cout<<"Request: "<<storstr<<endl;
 					send_all(serverfd,storstr.c_str(),storstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
 
 					int dataportclientfd = accept_connection(dataportserverfd);
 					
-					
+					// Opening file and sending Data
 					FILE * filew;
 					int numw;
 					filew=fopen(path.c_str(),"rb");
@@ -469,26 +518,31 @@ int main(int argc, char **argv){
 					cout<<"Response: "<<res<<endl;
 					
 				}else{
+					// Switching to Binary Mode
+
 					string typei = "TYPE I\r\n";
-					cout<<"Request: "<<typei<<endl;
+					if(debug == 1) cout<<"Request: "<<typei<<endl;
 					send_all(serverfd,typei.c_str(),typei.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
-					
+
+					// Getting a random port and corresponding PORT command
 					string portstr,port;
 					getportstring(getownip(serverfd),portstr,port);
 					
+					// Listening to data server
 					int dataportserverfd = server_listen(port.c_str());
-					cout<<"Request: "<<portstr<<endl;
+					if(debug == 1) cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
 
-					string path = userinput.substr(3);
+					string path = userinput.substr(3); // Gets the filename from get command
 					path = trim(path);
 					
+
 					string getstr = "RETR "+path+"\r\n";
-					cout<<"Request: "<<getstr<<endl;
+					if(debug == 1) cout<<"Request: "<<getstr<<endl;
 					send_all(serverfd,getstr.c_str(),getstr.size());
 					recvoneline(serverfd,res);
 
@@ -502,7 +556,7 @@ int main(int argc, char **argv){
 					
 					FILE * filew;
 					int numw;
-
+					// Receiving data and storing it in file.
 					filew=fopen(path.c_str(),"wb");
 					cout<<"DATA TRANSFER"<<endl;
 					int len = recvallbinary(dataportclientfd,filew);
@@ -527,11 +581,11 @@ int main(int argc, char **argv){
 					string portstr,port;
 					getportstring(getownip(serverfd),portstr,port);
 					int dataportserverfd = server_listen(port.c_str());
-					cout<<"Request: "<<portstr<<endl;
+					if(debug == 1) cout<<"Request: "<<portstr<<endl;
 					send_all(serverfd,portstr.c_str(),portstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
-					cout<<"Request: "<<"LIST\r\n"<<endl;
+					if(debug == 1) cout<<"Request: "<<"LIST\r\n"<<endl;
 					send_all(serverfd,"LIST\r\n",strlen("LIST\r\n"));
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
@@ -550,13 +604,13 @@ int main(int argc, char **argv){
 					string path = userinput.substr(2);
 					path = trim(path);
 					string cwdstr = "CWD "+path+"\r\n";
-					cout<<"Request: "<<cwdstr<<endl;
+					if(debug == 1) cout<<"Request: "<<cwdstr<<endl;
 					send_all(serverfd,cwdstr.c_str(),cwdstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
 			}else if(userinput.compare(0,strlen("pwd"),"pwd") == 0){
 					string pwdstr = "PWD\r\n";
-					cout<<"Request: "<<pwdstr<<endl;
+					if(debug == 1) cout<<"Request: "<<pwdstr<<endl;
 					send_all(serverfd,pwdstr.c_str(),pwdstr.size());
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
