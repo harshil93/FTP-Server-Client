@@ -560,12 +560,23 @@ void doftp(int clientControlfd){
 			string path = command.substr(4);
 			path = trim(path);
 
+			struct stat st;
+			int statcode = stat(path.c_str(), &st);
+			int size = st.st_size;
+			if(statcode == -1){
+				close(clientDatafd);
+				close(datasocket);
+				clientDatafd = 0;
+				datasocket  = 0;
+				string res = "550 "+string(strerror(errno))+"\r\n";
+				send_all(clientControlfd,res.c_str(),res.size());
+				binarymode=0;
+				continue;
+			}
+
 			string res = "150 Opening BINARY mode data connection for "+path+"\r\n";
 			send_all(clientControlfd,res.c_str(),res.size());
 
-			struct stat st;
-			stat(path.c_str(), &st);
-			int size = st.st_size;
 			
 			FILE * filew;
 			int numw;

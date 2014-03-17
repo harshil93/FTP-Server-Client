@@ -378,7 +378,6 @@ int main(int argc, char **argv){
 	}
 	int serverfd;
 	if( (serverfd = make_client_connection(argv[1],argv[2]) ) > 0 ){
-		PR(getownip(serverfd))
 		string res,user,pass;
 		recvoneline(serverfd,res);
 		cout<<"Response: "<<res<<endl;
@@ -413,6 +412,16 @@ int main(int argc, char **argv){
 					cout<<"Response: "<<res<<endl;
 					
 				}else{
+					string path = userinput.substr(3);
+					path = trim(path);
+					struct stat st;
+					int statcode = stat(path.c_str(), &st);
+					int size = st.st_size;
+					if(statcode == -1){
+						cout<<strerror(errno)<<endl;
+						continue;
+					}
+
 					string typei = "TYPE I\r\n";
 					cout<<"Request: "<<typei<<endl;
 					send_all(serverfd,typei.c_str(),typei.size());
@@ -427,8 +436,7 @@ int main(int argc, char **argv){
 					recvoneline(serverfd,res);
 					cout<<"Response: "<<res<<endl;
 
-					string path = userinput.substr(3);
-					path = trim(path);
+					
 					
 					string storstr = "STOR "+path+"\r\n";
 					cout<<"Request: "<<storstr<<endl;
@@ -437,9 +445,7 @@ int main(int argc, char **argv){
 					cout<<"Response: "<<res<<endl;
 
 					int dataportclientfd = accept_connection(dataportserverfd);
-					struct stat st;
-					stat(path.c_str(), &st);
-					int size = st.st_size;
+					
 					
 					FILE * filew;
 					int numw;
@@ -485,8 +491,13 @@ int main(int argc, char **argv){
 					cout<<"Request: "<<getstr<<endl;
 					send_all(serverfd,getstr.c_str(),getstr.size());
 					recvoneline(serverfd,res);
-					cout<<"Response: "<<res<<endl;
 
+
+					cout<<"Response: "<<res<<endl;
+					if(res.compare(0,strlen("550"),"550") == 0){
+						close(dataportserverfd);
+						continue;
+					}
 					int dataportclientfd = accept_connection(dataportserverfd);
 					
 					FILE * filew;
